@@ -21,7 +21,7 @@ def send_welcome(message):
 # Middleware function
 def modify_message_handler(bot_instance, message):
     if "مانلی" or "maneli" in message.text:
-        message.modified_text = message.text + '❤️'
+        message.modified_text = "مانلی" + '❤️'
 
 bot.add_middleware_handler(modify_message_handler, update_types=['message'])
 
