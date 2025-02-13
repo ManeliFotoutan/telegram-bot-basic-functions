@@ -4,22 +4,34 @@ import os
 from dotenv import load_dotenv
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telebot import types
+import logging
+import requests
+import threading
+import time
 
 # Enable middleware
 apihelper.ENABLE_MIDDLEWARE = True
 
 # Load API token from .env file
 load_dotenv()
-API_TOKEN = os.getenv("API_TOKEN")
 
+logger = telebot.logger
+telebot.logger.setLevel(logging.INFO)
+
+if not os.path.exists("downloads"):
+    os.makedirs("downloads")
+
+API_TOKEN = os.environ.get("API_TOKEN")
 bot = telebot.TeleBot(API_TOKEN)
+
+DOWNLOAD_DIR = "downloads/"
 
 user_profiles = {}
 
 # Regular Reply Keyboard
 keyboard = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
 button1 = KeyboardButton("وارد کردن اطلاعات")
-button2 = KeyboardButton("ارسال عکس")
+button2 = KeyboardButton("url")
 keyboard.add(button1, button2)
 
 # Inline Keyboard
@@ -66,11 +78,6 @@ def query_text(query):
         print(e)
 
 
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    bot.reply_to(message, "چه عکس زیبایی!")
-
-
 @bot.message_handler(func=lambda message: message.text == "وارد کردن اطلاعات")
 def ask_name(message):
     bot.send_message(message.chat.id, "لطفاً نام خود را وارد کنید:")
@@ -104,15 +111,53 @@ def handle_inline_buttons(call):
         bot.send_message(chat_id, "🔄 اطلاعات قبلی حذف شد. لطفاً نام خود را دوباره وارد کنید:")
         bot.register_next_step_handler(call.message, save_name)
 
-@bot.message_handler(func=lambda message: message.text == "ارسال عکس")
-def ask_for_picture(message):
-    bot.send_message(message.chat.id, "لطفاً یک عکس ارسال کنید.")
+@bot.message_handler(func=lambda message: message.text == "url")
+def request_url(message):
+    chat_id = message.chat.id
+    bot.send_message(chat_id, "لطفاً لینک مورد نظر را ارسال کنید:")
+    bot.register_next_step_handler(message, process_url)
 
-@bot.message_handler(content_types=['photo'])
-def handle_photo(message):
-    bot.send_message(message.chat.id, "✅ عکس دریافت شد!")
-    bot.reply_to(message, "چه عکس زیبایی!")
+def process_url(message):
+    url = message.text
+    chat_id = message.chat.id
 
+    if not url.startswith("http"):
+        bot.send_message(chat_id, "لینک نامعتبر است. لطفاً یک لینک معتبر ارسال کنید.")
+        return
+
+    try:
+        file_path = download_file(url)
+        with open(file_path, "rb") as file:
+            bot.send_document(
+                chat_id=chat_id,
+                document=file,
+                caption="فایل شما با موفقیت دانلود شد!"
+            )
+        schedule_deletion(file_path, delay=60)  # Delete after 60 seconds
+
+    except Exception as e:
+        logger.error(f"Error downloading file: {e}")
+        bot.send_message(chat_id, "مشکلی در دانلود فایل موردنظر پیش آمد.")
+
+def download_file(url):
+    local_filename = os.path.join(DOWNLOAD_DIR, url.split("/")[-1])
+
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(local_filename, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+    return local_filename
+
+def schedule_deletion(file_path, delay=60):
+    def delete():
+        time.sleep(delay)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Deleted file: {file_path}")
+
+    threading.Thread(target=delete, daemon=True).start()
 @bot.message_handler(func=lambda message: True)
 def echo_all(message):
     bot.send_message(message.chat.id, "دستور نامعتبر است. لطفاً یکی از گزینه‌های زیر را انتخاب کنید:", reply_markup=keyboard)
